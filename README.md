@@ -21,6 +21,15 @@ glimpse(tweets)
     ## $ text     <chr> "Our Deeds are the Reason of this #earthquake May ALLAH Forgi~
     ## $ target   <dbl> 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0~
 
+``` r
+mean(tweets$target)
+```
+
+    ## [1] 0.4296598
+
+This is close enough to 0.5 that I will still use an accuracy score. If
+it becomes a problem I might use f1 score.
+
 I will use object type corpus from the tm package to process the data. A
 corpus is a collection of text style character strings or documents.
 
@@ -71,26 +80,21 @@ n <- nrow(tweets)
 test <- read_csv('./test.csv', show_col_types = FALSE)
 
 all_tweets <- bind_rows(tweets, test)
-all_tweets_processed <- bind_cols(
-  preprocess_tweets(all_tweets$text),
-  preprocess_tweets(all_tweets$location),
-  preprocess_tweets(all_tweets$keyword)
-)
-```
 
-    ## New names:
-    ## * earthquak -> earthquak...1
-    ## * canada -> canada...4
-    ## * fire -> fire...5
-    ## * evacu -> evacu...9
-    ## * california -> california...15
-    ## * ...
+x_text <- preprocess_tweets(all_tweets$text)
+x_location <- preprocess_tweets(all_tweets$location)
+x_keyword <- preprocess_tweets(all_tweets$keyword, 0.9999)
 
-``` r
-data_x <- all_tweets_processed[1:n,]
-data_y <- tweets$target
+y_target <- tweets$target
 
-test_x <- all_tweets_processed[(n + 1):nrow(all_tweets_processed),]
+# only for use in kaggle predictions
+test_x_text <- x_text[(n + 1):nrow(all_tweets),]
+test_x_location <- x_location[(n + 1):nrow(all_tweets),]
+test_x_keyword <- x_keyword[(n + 1):nrow(all_tweets),]
+
+x_text <- x_text[1:n,]
+x_location <- x_location[1:n,]
+x_keyword <- x_keyword[1:n,]
 ```
 
 ``` r
@@ -103,31 +107,38 @@ tweets$text[1:4]
     ## [4] "13,000 people receive #wildfires evacuation orders in California"
 
 ``` r
-data_x[1:4, 1:10]
+x_text[1:4, 1:10]
 ```
 
     ## # A tibble: 4 x 10
-    ##   earthquak...1   may reason canada...4 fire...5 forest  near   ask evacu...9
-    ##           <dbl> <dbl>  <dbl>      <dbl>    <dbl>  <dbl> <dbl> <dbl>     <dbl>
-    ## 1             1     1      1          0        0      0     0     0         0
-    ## 2             0     0      0          1        1      1     1     0         0
-    ## 3             0     0      0          0        0      0     0     1         1
-    ## 4             0     0      0          0        0      0     0     0         1
-    ## # ... with 1 more variable: expect <dbl>
+    ##   earthquak   may reason canada  fire forest  near   ask evacu expect
+    ##       <dbl> <dbl>  <dbl>  <dbl> <dbl>  <dbl> <dbl> <dbl> <dbl>  <dbl>
+    ## 1         1     1      1      0     0      0     0     0     0      0
+    ## 2         0     0      0      1     1      1     1     0     0      0
+    ## 3         0     0      0      0     0      0     0     1     1      1
+    ## 4         0     0      0      0     0      0     0     0     1      0
 
 Splitting into validation set if training is too slow to use cross
 validation
 
 ``` r
-train_group <- sample(c(TRUE, FALSE), nrow(data_x), replace = TRUE, prob = c(0.75, 0.25))
-train_x <- data_x[train_group,]
-valid_x <- data_x[!train_group,]
+train_group <- sample(c(TRUE, FALSE), length(y_target), replace = TRUE, prob = c(0.75, 0.25))
 
-train_y <- data_y[train_group]
-valid_y <- data_y[!train_group]
+train_x_text <- x_text[train_group,]
+train_x_location <- x_location[train_group,]
+train_x_keyword <- x_keyword[train_group,]
+
+valid_x_text <- x_text[!train_group,]
+valid_x_location <- x_location[!train_group,]
+valid_x_keyword <- x_keyword[!train_group,]
+
+train_y <- y_target[train_group]
+valid_y <- y_target[!train_group]
 ```
 
-I will just apply an easy rf model for now.
+I want to stack 3 random forest models for each of the three variables
+so there is better control over the weights of variables that would not
+be present in a single large random forest model.
 
 ``` r
 library(randomForest)
@@ -149,139 +160,76 @@ library(randomForest)
     ##     margin
 
 ``` r
-rf.model <- randomForest(x = train_x, y = as.factor(train_y))
-```
+rf.model.text <- randomForest(x = train_x_text, y = as.factor(train_y))
+rf.model.location <- randomForest(x = train_x_location, y = as.factor(train_y))
+rf.model.keyword <- randomForest(x = train_x_keyword, y = as.factor(train_y))
 
-    ## Warning in do.call("cbind", lapply(x, "is.na")): unable to translate
-    ## '<U+0089>ûò' to native encoding
+pred_y_text <- predict(rf.model.text, newdata = valid_x_text) %>% as.character() %>% as.numeric()
+pred_y_location <- predict(rf.model.location, newdata = valid_x_location) %>% as.character() %>% as.numeric()
+pred_y_keyword <- predict(rf.model.keyword, newdata = valid_x_keyword) %>% as.character() %>% as.numeric()
 
-    ## Warning in do.call("cbind", lapply(x, "is.na")): unable to translate
-    ## '<U+0089>ûó' to native encoding
+stacked.rf.lm <- lm(valid_y ~ pred_y_text + pred_y_keyword + pred_y_location, family = 'binomial')
 
-    ## Warning in do.call("cbind", lapply(x, "is.na")): unable to translate
-    ## 'rea<U+0089>' to native encoding
+pred_y = predict(
+  stacked.rf.lm,
+  newdata = data.frame(
+    pred_y_text = as.numeric(as.character(predict(
+      rf.model.text,
+      newdata = valid_x_text
+    ))),
+    pred_y_location = as.numeric(as.character(predict(
+      rf.model.location,
+      newdata = valid_x_location
+    ))),
+    pred_y_keyword = as.numeric(as.character(predict(
+      rf.model.keyword,
+      newdata = valid_x_keyword
+    )))
+  )
+)
 
-    ## Warning in do.call("cbind", lapply(x, "is.na")): unable to translate
-    ## 're<U+0089>' to native encoding
-
-    ## Warning in do.call("cbind", lapply(x, "is.na")): unable to translate
-    ## '<U+0089>ûªve' to native encoding
-
-    ## Warning in do.call("cbind", lapply(x, "is.na")): unable to translate
-    ## 'read<U+0089>' to native encoding
-
-    ## Warning in do.call("cbind", lapply(x, "is.na")): unable to translate
-    ## '<U+0089>ûªs' to native encoding
-
-    ## Warning in do.call("cbind", lapply(x, "is.na")): unable to translate
-    ## 'don<U+0089>ûªt' to native encoding
-
-    ## Warning in do.call("cbind", lapply(x, "is.na")): unable to translate
-    ## 'china<U+0089>ûª' to native encoding
-
-    ## Warning in do.call("cbind", lapply(x, "is.na")): unable to translate
-    ## '<U+0089>ûïwhen' to native encoding
-
-    ## Warning in do.call("cbind", lapply(x, "is.na")): unable to translate '<U+0089>¢'
-    ## to native encoding
-
-``` r
-pred_y <- predict(rf.model, newdata = valid_x)
-```
-
-    ## Warning in do.call("cbind", lapply(x, "is.na")): unable to translate
-    ## '<U+0089>ûò' to native encoding
-
-    ## Warning in do.call("cbind", lapply(x, "is.na")): unable to translate
-    ## '<U+0089>ûó' to native encoding
-
-    ## Warning in do.call("cbind", lapply(x, "is.na")): unable to translate
-    ## 'rea<U+0089>' to native encoding
-
-    ## Warning in do.call("cbind", lapply(x, "is.na")): unable to translate
-    ## 're<U+0089>' to native encoding
-
-    ## Warning in do.call("cbind", lapply(x, "is.na")): unable to translate
-    ## '<U+0089>ûªve' to native encoding
-
-    ## Warning in do.call("cbind", lapply(x, "is.na")): unable to translate
-    ## 'read<U+0089>' to native encoding
-
-    ## Warning in do.call("cbind", lapply(x, "is.na")): unable to translate
-    ## '<U+0089>ûªs' to native encoding
-
-    ## Warning in do.call("cbind", lapply(x, "is.na")): unable to translate
-    ## 'don<U+0089>ûªt' to native encoding
-
-    ## Warning in do.call("cbind", lapply(x, "is.na")): unable to translate
-    ## 'china<U+0089>ûª' to native encoding
-
-    ## Warning in do.call("cbind", lapply(x, "is.na")): unable to translate
-    ## '<U+0089>ûïwhen' to native encoding
-
-    ## Warning in do.call("cbind", lapply(x, "is.na")): unable to translate '<U+0089>¢'
-    ## to native encoding
-
-``` r
-accuracy_rf <- mean(as.factor(pred_y) == as.factor(valid_y))
+accuracy_rf <- mean(round(pred_y) == valid_y)
 accuracy_rf
 ```
 
-    ## [1] 0.7725214
-
-I’ll attempt to best that with an xgboost model.
+    ## [1] 0.7705083
 
 ``` r
-library(xgboost)
+stacked.rf.lm
 ```
 
     ## 
-    ## Attaching package: 'xgboost'
-
-    ## The following object is masked from 'package:dplyr':
+    ## Call:
+    ## lm(formula = valid_y ~ pred_y_text + pred_y_keyword + pred_y_location, 
+    ##     family = "binomial")
     ## 
-    ##     slice
+    ## Coefficients:
+    ##     (Intercept)      pred_y_text   pred_y_keyword  pred_y_location  
+    ##         0.16998          0.44545          0.14612          0.05626
 
-``` r
-xgb.model <- xgboost(
-  data = as.matrix(train_x),
-  label = train_y,
-  max.depth = 99999999,
-  eta = 0.3,
-  nthread = 12,
-  nrounds = 1000,
-  objective = "binary:logistic",
-  early_stopping_rounds = 5,
-  verbose = 0
-  )
-```
-
-    ## [22:25:42] WARNING: amalgamation/../src/learner.cc:1115: Starting in XGBoost 1.3.0, the default evaluation metric used with the objective 'binary:logistic' was changed from 'error' to 'logloss'. Explicitly set eval_metric if you'd like to restore the old behavior.
-
-``` r
-pred_y <- predict(xgb.model, newdata = as.matrix(valid_x))
-
-accuracy_xgb <- mean(round(pred_y) == valid_y)
-accuracy_xgb
-```
-
-    ## [1] 0.7669854
-
-These models are not as accurate as I would like. I plan to try other
+This model is not as accurate as I would like. I plan to try other
 methods in the future, use the whole dataset with CV, or tune the models
 better using a grid searching method. I also want to use the linked
 tweets as more predictors.
 
 ``` r
-if(accuracy_xgb < accuracy_rf) {
-  pred_test_y <- predict(xgb.model, newdata = as.matrix(test_x)) %>% 
-    round()
-} else {
-  pred_test_y <- predict(rf.model, newdata = test_x) %>% 
-    as.character() %>% 
-    as.numeric()
-}
-
-tibble(id = test$id, target = pred_test_y) %>% 
+tibble(id = test$id,
+       target = round(predict(
+        stacked.rf.lm,
+        newdata = data.frame(
+          pred_y_text = as.numeric(as.character(predict(
+            rf.model.text,
+            newdata = test_x_text
+          ))),
+          pred_y_location = as.numeric(as.character(predict(
+            rf.model.location,
+            newdata = test_x_location
+          ))),
+          pred_y_keyword = as.numeric(as.character(predict(
+            rf.model.keyword,
+            newdata = test_x_keyword
+          )))
+        )
+       ))) %>% 
   write_csv('./my_submission.csv')
 ```
