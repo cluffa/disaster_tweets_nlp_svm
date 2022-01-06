@@ -30,7 +30,7 @@ Corpus(VectorSource(tweets$text))
 ```{r warning=FALSE}
 # using tm package
 
-preprocess_tweets <- function(text, prob = 0.99, extra_blacklist = c()) {
+preprocess_tweets <- function(text, prob = 0.999, extra_blacklist = c()) {
   # Sort of One-Hot-Encoding but for entire tweet and encodes each word,
   # removes sparse words
   # input char vector of tweets, prob, extra words to remove

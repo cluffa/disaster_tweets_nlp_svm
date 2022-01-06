@@ -35,7 +35,7 @@ Corpus(VectorSource(tweets$text))
 ``` r
 # using tm package
 
-preprocess_tweets <- function(text, prob = 0.99, extra_blacklist = c()) {
+preprocess_tweets <- function(text, prob = 0.999, extra_blacklist = c()) {
   # Sort of One-Hot-Encoding but for entire tweet and encodes each word,
   # removes sparse words
   # input char vector of tweets, prob, extra words to remove
@@ -79,11 +79,11 @@ all_tweets_processed <- bind_cols(
 ```
 
     ## New names:
-    ## * evacu -> evacu...3
-    ## * california -> california...4
-    ## * flood -> flood...11
-    ## * new -> new...31
-    ## * scream -> scream...66
+    ## * earthquak -> earthquak...1
+    ## * canada -> canada...4
+    ## * fire -> fire...5
+    ## * evacu -> evacu...9
+    ## * california -> california...15
     ## * ...
 
 ``` r
@@ -107,12 +107,13 @@ data_x[1:4, 1:10]
 ```
 
     ## # A tibble: 4 x 10
-    ##    fire  near evacu...3 california...4 peopl wildfir   got  just  caus disast
-    ##   <dbl> <dbl>     <dbl>          <dbl> <dbl>   <dbl> <dbl> <dbl> <dbl>  <dbl>
-    ## 1     0     0         0              0     0       0     0     0     0      0
-    ## 2     1     1         0              0     0       0     0     0     0      0
-    ## 3     0     0         1              0     0       0     0     0     0      0
-    ## 4     0     0         1              1     1       1     0     0     0      0
+    ##   earthquak...1   may reason canada...4 fire...5 forest  near   ask evacu...9
+    ##           <dbl> <dbl>  <dbl>      <dbl>    <dbl>  <dbl> <dbl> <dbl>     <dbl>
+    ## 1             1     1      1          0        0      0     0     0         0
+    ## 2             0     0      0          1        1      1     1     0         0
+    ## 3             0     0      0          0        0      0     0     1         1
+    ## 4             0     0      0          0        0      0     0     0         1
+    ## # ... with 1 more variable: expect <dbl>
 
 Splitting into validation set if training is too slow to use cross
 validation
@@ -149,13 +150,84 @@ library(randomForest)
 
 ``` r
 rf.model <- randomForest(x = train_x, y = as.factor(train_y))
-pred_y <- predict(rf.model, newdata = valid_x)
+```
 
+    ## Warning in do.call("cbind", lapply(x, "is.na")): unable to translate
+    ## '<U+0089>ûò' to native encoding
+
+    ## Warning in do.call("cbind", lapply(x, "is.na")): unable to translate
+    ## '<U+0089>ûó' to native encoding
+
+    ## Warning in do.call("cbind", lapply(x, "is.na")): unable to translate
+    ## 'rea<U+0089>' to native encoding
+
+    ## Warning in do.call("cbind", lapply(x, "is.na")): unable to translate
+    ## 're<U+0089>' to native encoding
+
+    ## Warning in do.call("cbind", lapply(x, "is.na")): unable to translate
+    ## '<U+0089>ûªve' to native encoding
+
+    ## Warning in do.call("cbind", lapply(x, "is.na")): unable to translate
+    ## 'read<U+0089>' to native encoding
+
+    ## Warning in do.call("cbind", lapply(x, "is.na")): unable to translate
+    ## '<U+0089>ûªs' to native encoding
+
+    ## Warning in do.call("cbind", lapply(x, "is.na")): unable to translate
+    ## 'don<U+0089>ûªt' to native encoding
+
+    ## Warning in do.call("cbind", lapply(x, "is.na")): unable to translate
+    ## 'china<U+0089>ûª' to native encoding
+
+    ## Warning in do.call("cbind", lapply(x, "is.na")): unable to translate
+    ## '<U+0089>ûïwhen' to native encoding
+
+    ## Warning in do.call("cbind", lapply(x, "is.na")): unable to translate '<U+0089>¢'
+    ## to native encoding
+
+``` r
+pred_y <- predict(rf.model, newdata = valid_x)
+```
+
+    ## Warning in do.call("cbind", lapply(x, "is.na")): unable to translate
+    ## '<U+0089>ûò' to native encoding
+
+    ## Warning in do.call("cbind", lapply(x, "is.na")): unable to translate
+    ## '<U+0089>ûó' to native encoding
+
+    ## Warning in do.call("cbind", lapply(x, "is.na")): unable to translate
+    ## 'rea<U+0089>' to native encoding
+
+    ## Warning in do.call("cbind", lapply(x, "is.na")): unable to translate
+    ## 're<U+0089>' to native encoding
+
+    ## Warning in do.call("cbind", lapply(x, "is.na")): unable to translate
+    ## '<U+0089>ûªve' to native encoding
+
+    ## Warning in do.call("cbind", lapply(x, "is.na")): unable to translate
+    ## 'read<U+0089>' to native encoding
+
+    ## Warning in do.call("cbind", lapply(x, "is.na")): unable to translate
+    ## '<U+0089>ûªs' to native encoding
+
+    ## Warning in do.call("cbind", lapply(x, "is.na")): unable to translate
+    ## 'don<U+0089>ûªt' to native encoding
+
+    ## Warning in do.call("cbind", lapply(x, "is.na")): unable to translate
+    ## 'china<U+0089>ûª' to native encoding
+
+    ## Warning in do.call("cbind", lapply(x, "is.na")): unable to translate
+    ## '<U+0089>ûïwhen' to native encoding
+
+    ## Warning in do.call("cbind", lapply(x, "is.na")): unable to translate '<U+0089>¢'
+    ## to native encoding
+
+``` r
 accuracy_rf <- mean(as.factor(pred_y) == as.factor(valid_y))
 accuracy_rf
 ```
 
-    ## [1] 0.7116256
+    ## [1] 0.7725214
 
 I’ll attempt to best that with an xgboost model.
 
@@ -184,7 +256,7 @@ xgb.model <- xgboost(
   )
 ```
 
-    ## [20:47:11] WARNING: amalgamation/../src/learner.cc:1115: Starting in XGBoost 1.3.0, the default evaluation metric used with the objective 'binary:logistic' was changed from 'error' to 'logloss'. Explicitly set eval_metric if you'd like to restore the old behavior.
+    ## [22:25:42] WARNING: amalgamation/../src/learner.cc:1115: Starting in XGBoost 1.3.0, the default evaluation metric used with the objective 'binary:logistic' was changed from 'error' to 'logloss'. Explicitly set eval_metric if you'd like to restore the old behavior.
 
 ``` r
 pred_y <- predict(xgb.model, newdata = as.matrix(valid_x))
@@ -193,7 +265,7 @@ accuracy_xgb <- mean(round(pred_y) == valid_y)
 accuracy_xgb
 ```
 
-    ## [1] 0.70307
+    ## [1] 0.7669854
 
 These models are not as accurate as I would like. I plan to try other
 methods in the future, use the whole dataset with CV, or tune the models
