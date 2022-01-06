@@ -148,7 +148,9 @@ accuracy_rf
 stacked.rf.lm
 ```
 
-This model is not as accurate as I would like. I plan to try other methods in the future, use the whole dataset with CV, or tune the models better using a grid searching method. I also want to use the linked tweets as more predictors.
+This model is not as accurate as I would like. I am not convinced that stacking the models gives any benefit. I would like to use a BERT model if I find an easy implementation to use in R.
+
+In the future, I plan to use the whole dataset with CV, or tune the models better using a grid searching method. I also want to use the linked tweets as more predictors.
 
 ```{r warning=FALSE}
 tibble(id = test$id,
