@@ -1,0 +1,145 @@
+---
+title: "NLP"
+output: html_notebook
+---
+
+This is project to introduce myself to NLP in R.
+
+With Kaggle disaster tweets dataset:
+
+[Natural Language Processing with Disaster Tweets \| Kaggle](https://www.kaggle.com/c/nlp-getting-started)
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(tm)
+set.seed(1)
+```
+
+```{r}
+tweets <- read_csv('./train.csv', show_col_types = FALSE)
+glimpse(tweets)
+```
+
+I will use object type corpus from the tm package to process the data. A corpus is a collection of text style character strings or documents.
+
+```{r}
+Corpus(VectorSource(tweets$text))
+```
+
+```{r warning=FALSE}
+# using tm package
+
+preprocess_tweets <- function(text, prob = 0.99, extra_blacklist = c()) {
+  # Sort of One-Hot-Encoding but for entire tweet and encodes each word,
+  # removes sparse words
+  # input char vector of tweets, prob, extra words to remove
+  
+  # words to remove
+  blacklist <- c( 
+    stopwords("english"),
+    'û',
+    extra_blacklist)
+  
+  text %>% 
+    VectorSource() %>%                  # makes a vector input formatted for corpus()
+    Corpus() %>%                        # creates list of documents called a corpus
+    tm_map(PlainTextDocument) %>%       # converts to plain text
+    tm_map(tolower) %>%                 # makes all lowercase
+    tm_map(removePunctuation) %>%       # remove punctuation
+    tm_map(removeWords, blacklist) %>%  # remove blacklisted words
+    tm_map(stemDocument) %>%            # combine stem words, ex: jumping/jumped
+    DocumentTermMatrix() %>%            # converts to binary matrix
+    removeSparseTerms(prob) %>%         # keeps top prob/99.5% words
+    as.matrix() %>%
+    as.tibble() %>% 
+    suppressWarnings() %>% 
+    return()
+}
+```
+
+I will use the same function on text, keyword, and location to make it simple. This adds about 100 more variables than just using text.
+
+```{r warning=FALSE}
+n <- nrow(tweets)
+test <- read_csv('./test.csv', show_col_types = FALSE)
+
+all_tweets <- bind_rows(tweets, test)
+all_tweets_processed <- bind_cols(
+  preprocess_tweets(all_tweets$text),
+  preprocess_tweets(all_tweets$location),
+  preprocess_tweets(all_tweets$keyword)
+)
+
+data_x <- all_tweets_processed[1:n,]
+data_y <- tweets$target
+
+test_x <- all_tweets_processed[(n + 1):nrow(all_tweets_processed),]
+```
+```{r}
+tweets$text[1:4]
+data_x[1:4, 1:10]
+```
+
+
+
+Splitting into validation set if training is too slow to use cross validation
+
+```{r}
+train_group <- sample(c(TRUE, FALSE), nrow(data_x), replace = TRUE, prob = c(0.75, 0.25))
+train_x <- data_x[train_group,]
+valid_x <- data_x[!train_group,]
+
+train_y <- data_y[train_group]
+valid_y <- data_y[!train_group]
+```
+
+I will just apply an easy rf model for now.
+
+```{r}
+library(randomForest)
+rf.model <- randomForest(x = train_x, y = as.factor(train_y))
+pred_y <- predict(rf.model, newdata = valid_x)
+
+accuracy_rf <- mean(as.factor(pred_y) == as.factor(valid_y))
+accuracy_rf
+```
+
+I'll attempt to best that with an xgboost model.
+
+```{r}
+library(xgboost)
+xgb.model <- xgboost(
+  data = as.matrix(train_x),
+  label = train_y,
+  max.depth = 99999999,
+  eta = 0.3,
+  nthread = 12,
+  nrounds = 1000,
+  objective = "binary:logistic",
+  early_stopping_rounds = 5,
+  verbose = 0
+  )
+
+pred_y <- predict(xgb.model, newdata = as.matrix(valid_x))
+
+accuracy_xgb <- mean(round(pred_y) == valid_y)
+accuracy_xgb
+```
+
+These models are not as accurate as I would like. I plan to try other methods in the future, use the whole dataset with CV, or tune the models better using a grid searching method. I also want to use the linked tweets as more predictors.
+
+```{r}
+if(accuracy_xgb < accuracy_rf) {
+  pred_test_y <- predict(xgb.model, newdata = as.matrix(test_x)) %>% 
+    round()
+} else {
+  pred_test_y <- predict(rf.model, newdata = test_x) %>% 
+    as.character() %>% 
+    as.numeric()
+}
+
+tibble(id = test$id, target = pred_test_y) %>% 
+  write_csv('./my_submission.csv')
+```
+
