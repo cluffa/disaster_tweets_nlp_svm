@@ -207,10 +207,13 @@ stacked.rf.lm
     ##     (Intercept)      pred_y_text   pred_y_keyword  pred_y_location  
     ##         0.16998          0.44545          0.14612          0.05626
 
-This model is not as accurate as I would like. I plan to try other
-methods in the future, use the whole dataset with CV, or tune the models
-better using a grid searching method. I also want to use the linked
-tweets as more predictors.
+This model is not as accurate as I would like. I am not convinced that
+stacking the models gives any benefit. I would like to use a BERT model
+if I find an easy implementation to use in R.
+
+In the future, I plan to use the whole dataset with CV, or tune the
+models better using a grid searching method. I also want to use the
+linked tweets as more predictors.
 
 ``` r
 tibble(id = test$id,
