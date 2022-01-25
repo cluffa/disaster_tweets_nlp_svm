@@ -1,5 +1,5 @@
 ---
-title: "NLP"
+title: "Disaster Tweets"
 output: github_document
 ---
 
@@ -13,6 +13,7 @@ With Kaggle disaster tweets dataset:
 knitr::opts_chunk$set(echo = TRUE, cache = TRUE, cache.comments = FALSE)
 library(tidyverse)
 library(tm)
+library(e1071)
 set.seed(1)
 ```
 
@@ -34,7 +35,7 @@ Corpus(VectorSource(tweets$text))
 # using tm package
 
 preprocess_tweets <- function(text, prob = 0.999, extra_blacklist = c()) {
-  # Sort of One-Hot-Encoding but for entire tweet and encodes each word,
+  # bag of words style encoding
   # removes sparse words
   # input char vector of tweets, prob, extra words to remove
   
@@ -53,7 +54,7 @@ preprocess_tweets <- function(text, prob = 0.999, extra_blacklist = c()) {
     tm_map(removeWords, blacklist) %>%  # remove blacklisted words
     tm_map(stemDocument) %>%            # combine stem words, ex: jumping/jumped
     DocumentTermMatrix() %>%            # converts to binary matrix
-    removeSparseTerms(prob) %>%         # keeps top prob/99.5% words
+    removeSparseTerms(prob) %>%         # keeps top 99.9% or specified % of words
     as.matrix() %>%
     as.tibble() %>% 
     suppressWarnings() %>% 
@@ -70,8 +71,12 @@ test <- read_csv('./test.csv', show_col_types = FALSE)
 all_tweets <- bind_rows(tweets, test)
 
 x_text <- preprocess_tweets(all_tweets$text)
-x_location <- preprocess_tweets(all_tweets$location)
+x_location <- preprocess_tweets(all_tweets$location, 0.9995)
 x_keyword <- preprocess_tweets(all_tweets$keyword, 0.9999)
+
+names(x_text) <- paste0('text_', names(x_text))
+names(x_location) <- paste0('location_', names(x_location))
+names(x_keyword) <- paste0('keyword_', names(x_keyword))
 
 y_target <- tweets$target
 
@@ -108,69 +113,56 @@ train_y <- y_target[train_group]
 valid_y <- y_target[!train_group]
 ```
 
-I want to stack 3 random forest models for each of the three variables so there is better control over the weights of variables that would not be present in a single large random forest model.
 
-```{r warning=FALSE}
-library(randomForest)
-rf.model.text <- randomForest(x = train_x_text, y = as.factor(train_y))
-rf.model.location <- randomForest(x = train_x_location, y = as.factor(train_y))
-rf.model.keyword <- randomForest(x = train_x_keyword, y = as.factor(train_y))
+Testing accuracy with inclusion of different text fields and cost with linear svm. 
 
-pred_y_text <- predict(rf.model.text, newdata = valid_x_text) %>% as.character() %>% as.numeric()
-pred_y_location <- predict(rf.model.location, newdata = valid_x_location) %>% as.character() %>% as.numeric()
-pred_y_keyword <- predict(rf.model.keyword, newdata = valid_x_keyword) %>% as.character() %>% as.numeric()
+```{r warning=FALSE, message=FALSE}
+train_x <- list(text = train_x_text, keyword = train_x_keyword, location = train_x_location)
+valid_x <- list(text = valid_x_text, keyword = valid_x_keyword, location = valid_x_location)
 
-stacked.rf.lm <- lm(valid_y ~ pred_y_text + pred_y_keyword + pred_y_location, family = 'binomial')
-
-pred_y = predict(
-  stacked.rf.lm,
-  newdata = data.frame(
-    pred_y_text = as.numeric(as.character(predict(
-      rf.model.text,
-      newdata = valid_x_text
-    ))),
-    pred_y_location = as.numeric(as.character(predict(
-      rf.model.location,
-      newdata = valid_x_location
-    ))),
-    pred_y_keyword = as.numeric(as.character(predict(
-      rf.model.keyword,
-      newdata = valid_x_keyword
-    )))
-  )
+c_grid <- c(0.1, 1, 10)
+trys <- list(
+  c(T, F, F),
+  c(T, F, T),
+  c(T, T, F),
+  c(T, T, T)
 )
+options <- c('text', 'keyword', 'location')
 
-accuracy_rf <- mean(round(pred_y) == valid_y)
-accuracy_rf
+results <- data.frame()
+
+combinations <- length(c_grid)*length(trys)
+j = 0
+for (i in trys) {
+  for (c in c_grid) {
+    svm <- svm(x = bind_cols(train_x[i]), y = train_y, type = 'C', kernel = 'linear', cost = c, scale = FALSE)
+    pred_y <- predict(svm, newdata = bind_cols(valid_x[i]))
+    accuracy <- mean(pred_y == valid_y)
+    results <- bind_rows(results, data.frame(accuracy = accuracy, cost = c, text = i[1], keyword = i[2], location = i[3]))
+    
+    j = j + 1
+    print(paste0(as.character(j), '/', combinations, ' completed'))
+  }
+}
+```
+```{r warning=FALSE, message=FALSE}
+results %>% arrange(desc(accuracy))
 ```
 
-```{r}
-stacked.rf.lm
+A model trained on text and keywords with cost at 0.1 performed the best with an accuracy of 0.7856.
+
+```{r warning=FALSE, message=FALSE}
+train_x <- bind_cols(train_x_text,train_x_keyword)
+valid_x <- bind_cols(valid_x_text,valid_x_keyword)
+x <- bind_rows(train_x, valid_x)
+y <- c(train_y, valid_y)
+
+svm <- svm(x = x, y = y, type = 'C', kernel = 'linear', cost = 0.1, scale = FALSE)
 ```
 
-This model is not as accurate as I would like. I am not convinced that stacking the models gives any benefit. I would like to use a BERT model if I find an easy implementation to use in R.
-
-In the future, I plan to use the whole dataset with CV, or tune the models better using a grid searching method. I also want to use the linked tweets as more predictors.
-
-```{r warning=FALSE}
-tibble(id = test$id,
-       target = round(predict(
-        stacked.rf.lm,
-        newdata = data.frame(
-          pred_y_text = as.numeric(as.character(predict(
-            rf.model.text,
-            newdata = test_x_text
-          ))),
-          pred_y_location = as.numeric(as.character(predict(
-            rf.model.location,
-            newdata = test_x_location
-          ))),
-          pred_y_keyword = as.numeric(as.character(predict(
-            rf.model.keyword,
-            newdata = test_x_keyword
-          )))
-        )
-       ))) %>% 
-  write_csv('./my_submission.csv')
+fitting test data
+```{r warning=FALSE, message=FALSE}
+pred_submit <- predict(svm, newdata = bind_cols(test_x_text, test_x_keyword))
+head(data.frame(prediction = pred_submit, text = test$text), 10)
 ```
 
