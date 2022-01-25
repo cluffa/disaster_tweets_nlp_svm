@@ -1,4 +1,4 @@
-NLP
+Disaster Tweets
 ================
 
 This is project to introduce myself to NLP in R.
@@ -45,7 +45,7 @@ Corpus(VectorSource(tweets$text))
 # using tm package
 
 preprocess_tweets <- function(text, prob = 0.999, extra_blacklist = c()) {
-  # Sort of One-Hot-Encoding but for entire tweet and encodes each word,
+  # bag of words style encoding
   # removes sparse words
   # input char vector of tweets, prob, extra words to remove
   
@@ -64,7 +64,7 @@ preprocess_tweets <- function(text, prob = 0.999, extra_blacklist = c()) {
     tm_map(removeWords, blacklist) %>%  # remove blacklisted words
     tm_map(stemDocument) %>%            # combine stem words, ex: jumping/jumped
     DocumentTermMatrix() %>%            # converts to binary matrix
-    removeSparseTerms(prob) %>%         # keeps top prob/99.5% words
+    removeSparseTerms(prob) %>%         # keeps top 99.9% or specified % of words
     as.matrix() %>%
     as.tibble() %>% 
     suppressWarnings() %>% 
@@ -82,8 +82,12 @@ test <- read_csv('./test.csv', show_col_types = FALSE)
 all_tweets <- bind_rows(tweets, test)
 
 x_text <- preprocess_tweets(all_tweets$text)
-x_location <- preprocess_tweets(all_tweets$location)
+x_location <- preprocess_tweets(all_tweets$location, 0.9995)
 x_keyword <- preprocess_tweets(all_tweets$keyword, 0.9999)
+
+names(x_text) <- paste0('text_', names(x_text))
+names(x_location) <- paste0('location_', names(x_location))
+names(x_keyword) <- paste0('keyword_', names(x_keyword))
 
 y_target <- tweets$target
 
@@ -136,103 +140,108 @@ train_y <- y_target[train_group]
 valid_y <- y_target[!train_group]
 ```
 
-I want to stack 3 random forest models for each of the three variables
-so there is better control over the weights of variables that would not
-be present in a single large random forest model.
+Testing accuracy with inclusion of different text fields and cost with
+linear svm.
 
 ``` r
-library(randomForest)
-```
+train_x <- list(text = train_x_text, keyword = train_x_keyword, location = train_x_location)
+valid_x <- list(text = valid_x_text, keyword = valid_x_keyword, location = valid_x_location)
 
-    ## randomForest 4.6-14
-
-    ## Type rfNews() to see new features/changes/bug fixes.
-
-    ## 
-    ## Attaching package: 'randomForest'
-
-    ## The following object is masked from 'package:dplyr':
-    ## 
-    ##     combine
-
-    ## The following object is masked from 'package:ggplot2':
-    ## 
-    ##     margin
-
-``` r
-rf.model.text <- randomForest(x = train_x_text, y = as.factor(train_y))
-rf.model.location <- randomForest(x = train_x_location, y = as.factor(train_y))
-rf.model.keyword <- randomForest(x = train_x_keyword, y = as.factor(train_y))
-
-pred_y_text <- predict(rf.model.text, newdata = valid_x_text) %>% as.character() %>% as.numeric()
-pred_y_location <- predict(rf.model.location, newdata = valid_x_location) %>% as.character() %>% as.numeric()
-pred_y_keyword <- predict(rf.model.keyword, newdata = valid_x_keyword) %>% as.character() %>% as.numeric()
-
-stacked.rf.lm <- lm(valid_y ~ pred_y_text + pred_y_keyword + pred_y_location, family = 'binomial')
-
-pred_y = predict(
-  stacked.rf.lm,
-  newdata = data.frame(
-    pred_y_text = as.numeric(as.character(predict(
-      rf.model.text,
-      newdata = valid_x_text
-    ))),
-    pred_y_location = as.numeric(as.character(predict(
-      rf.model.location,
-      newdata = valid_x_location
-    ))),
-    pred_y_keyword = as.numeric(as.character(predict(
-      rf.model.keyword,
-      newdata = valid_x_keyword
-    )))
-  )
+c_grid <- c(0.1, 1, 10)
+trys <- list(
+  c(T, F, F),
+  c(T, F, T),
+  c(T, T, F),
+  c(T, T, T)
 )
+options <- c('text', 'keyword', 'location')
 
-accuracy_rf <- mean(round(pred_y) == valid_y)
-accuracy_rf
+results <- data.frame()
+
+combinations <- length(c_grid)*length(trys)
+j = 0
+for (i in trys) {
+  for (c in c_grid) {
+    svm <- svm(x = bind_cols(train_x[i]), y = train_y, type = 'C', kernel = 'linear', cost = c, scale = FALSE)
+    pred_y <- predict(svm, newdata = bind_cols(valid_x[i]))
+    accuracy <- mean(pred_y == valid_y)
+    results <- bind_rows(results, data.frame(accuracy = accuracy, cost = c, text = i[1], keyword = i[2], location = i[3]))
+    
+    j = j + 1
+    print(paste0(as.character(j), '/', combinations, ' completed'))
+  }
+}
 ```
 
-    ## [1] 0.7705083
+    ## [1] "1/12 completed"
+    ## [1] "2/12 completed"
+    ## [1] "3/12 completed"
+    ## [1] "4/12 completed"
+    ## [1] "5/12 completed"
+    ## [1] "6/12 completed"
+    ## [1] "7/12 completed"
+    ## [1] "8/12 completed"
+    ## [1] "9/12 completed"
+    ## [1] "10/12 completed"
+    ## [1] "11/12 completed"
+    ## [1] "12/12 completed"
 
 ``` r
-stacked.rf.lm
+results %>% arrange(desc(accuracy))
 ```
 
-    ## 
-    ## Call:
-    ## lm(formula = valid_y ~ pred_y_text + pred_y_keyword + pred_y_location, 
-    ##     family = "binomial")
-    ## 
-    ## Coefficients:
-    ##     (Intercept)      pred_y_text   pred_y_keyword  pred_y_location  
-    ##         0.16998          0.44545          0.14612          0.05626
+    ##     accuracy cost text keyword location
+    ## 1  0.7856064  0.1 TRUE    TRUE    FALSE
+    ## 2  0.7835934  0.1 TRUE   FALSE     TRUE
+    ## 3  0.7835934  0.1 TRUE    TRUE     TRUE
+    ## 4  0.7800705  1.0 TRUE   FALSE    FALSE
+    ## 5  0.7795672  0.1 TRUE   FALSE    FALSE
+    ## 6  0.7775541  1.0 TRUE   FALSE     TRUE
+    ## 7  0.7770508  1.0 TRUE    TRUE    FALSE
+    ## 8  0.7715148  1.0 TRUE    TRUE     TRUE
+    ## 9  0.7579265 10.0 TRUE   FALSE    FALSE
+    ## 10 0.7544036 10.0 TRUE    TRUE    FALSE
+    ## 11 0.7483644 10.0 TRUE   FALSE     TRUE
+    ## 12 0.7393055 10.0 TRUE    TRUE     TRUE
 
-This model is not as accurate as I would like. I am not convinced that
-stacking the models gives any benefit. I would like to use a BERT model
-if I find an easy implementation to use in R.
-
-In the future, I plan to use the whole dataset with CV, or tune the
-models better using a grid searching method. I also want to use the
-linked tweets as more predictors.
+A model trained on text and keywords with cost at 0.1 performed the best
+with an accuracy of 0.7856.
 
 ``` r
-tibble(id = test$id,
-       target = round(predict(
-        stacked.rf.lm,
-        newdata = data.frame(
-          pred_y_text = as.numeric(as.character(predict(
-            rf.model.text,
-            newdata = test_x_text
-          ))),
-          pred_y_location = as.numeric(as.character(predict(
-            rf.model.location,
-            newdata = test_x_location
-          ))),
-          pred_y_keyword = as.numeric(as.character(predict(
-            rf.model.keyword,
-            newdata = test_x_keyword
-          )))
-        )
-       ))) %>% 
-  write_csv('./my_submission.csv')
+train_x <- bind_cols(train_x_text,train_x_keyword)
+valid_x <- bind_cols(valid_x_text,valid_x_keyword)
+x <- bind_rows(train_x, valid_x)
+y <- c(train_y, valid_y)
+
+svm <- svm(x = x, y = y, type = 'C', kernel = 'linear', cost = 0.1, scale = FALSE)
 ```
+
+fitting test data
+
+``` r
+pred_submit <- predict(svm, newdata = bind_cols(test_x_text, test_x_keyword))
+head(data.frame(prediction = pred_submit, text = test$text), 10)
+```
+
+    ##    prediction
+    ## 1           1
+    ## 2           1
+    ## 3           1
+    ## 4           1
+    ## 5           1
+    ## 6           1
+    ## 7           0
+    ## 8           0
+    ## 9           0
+    ## 10          0
+    ##                                                                                                text
+    ## 1                                                                Just happened a terrible car crash
+    ## 2                                  Heard about #earthquake is different cities, stay safe everyone.
+    ## 3  there is a forest fire at spot pond, geese are fleeing across the street, I cannot save them all
+    ## 4                                                          Apocalypse lighting. #Spokane #wildfires
+    ## 5                                                     Typhoon Soudelor kills 28 in China and Taiwan
+    ## 6                                                                We're shaking...It's an earthquake
+    ## 7                          They'd probably still show more life than Arsenal did yesterday, eh? EH?
+    ## 8                                                                                 Hey! How are you?
+    ## 9                                                                                  What a nice hat?
+    ## 10                                                                                        Fuck off!
