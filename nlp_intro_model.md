@@ -245,3 +245,9 @@ head(data.frame(prediction = pred_submit, text = test$text), 10)
     ## 8                                                                                 Hey! How are you?
     ## 9                                                                                  What a nice hat?
     ## 10                                                                                        Fuck off!
+
+There are a few things I may want to do in the future:  
+1. fill out the rest of the keywords  
+2. fill out locations with places in text  
+3. work with the links  
+4. use tweets being replied to

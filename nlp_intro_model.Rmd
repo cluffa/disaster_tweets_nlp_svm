@@ -166,3 +166,8 @@ pred_submit <- predict(svm, newdata = bind_cols(test_x_text, test_x_keyword))
 head(data.frame(prediction = pred_submit, text = test$text), 10)
 ```
 
+There are a few things I may want to do in the future:  
+1. fill out the rest of the keywords  
+2. fill out locations with places in text  
+3. work with the links  
+4. use tweets being replied to  
