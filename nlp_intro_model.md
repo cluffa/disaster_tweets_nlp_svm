@@ -15,11 +15,11 @@ glimpse(tweets)
 
     ## Rows: 7,613
     ## Columns: 5
-    ## $ id       <dbl> 1, 4, 5, 6, 7, 8, 10, 13, 14, 15, 16, 17, 18, 19, 20, 23, 24,~
-    ## $ keyword  <chr> NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, N~
-    ## $ location <chr> NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, N~
-    ## $ text     <chr> "Our Deeds are the Reason of this #earthquake May ALLAH Forgi~
-    ## $ target   <dbl> 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0~
+    ## $ id       <dbl> 1, 4, 5, 6, 7, 8, 10, 13, 14, 15, 16, 17, 18, 19, 20, 23, 24,…
+    ## $ keyword  <chr> NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, N…
+    ## $ location <chr> NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, N…
+    ## $ text     <chr> "Our Deeds are the Reason of this #earthquake May ALLAH Forgi…
+    ## $ target   <dbl> 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0…
 
 ``` r
 mean(tweets$target)
@@ -73,7 +73,8 @@ preprocess_tweets <- function(text, prob = 0.999, extra_blacklist = c()) {
 ```
 
 I will use the same function on text, keyword, and location to make it
-simple. This adds about 100 more variables than just using text.
+simple. This adds 100s of new predictors to use depending on how many
+sparse words I remove.
 
 ``` r
 n <- nrow(tweets)
@@ -114,16 +115,17 @@ tweets$text[1:4]
 x_text[1:4, 1:10]
 ```
 
-    ## # A tibble: 4 x 10
-    ##   earthquak   may reason canada  fire forest  near   ask evacu expect
-    ##       <dbl> <dbl>  <dbl>  <dbl> <dbl>  <dbl> <dbl> <dbl> <dbl>  <dbl>
-    ## 1         1     1      1      0     0      0     0     0     0      0
-    ## 2         0     0      0      1     1      1     1     0     0      0
-    ## 3         0     0      0      0     0      0     0     1     1      1
-    ## 4         0     0      0      0     0      0     0     0     1      0
+    ## # A tibble: 4 × 10
+    ##   text_earthquak text_may text_reason text_canada text_fire text_forest
+    ##            <dbl>    <dbl>       <dbl>       <dbl>     <dbl>       <dbl>
+    ## 1              1        1           1           0         0           0
+    ## 2              0        0           0           1         1           1
+    ## 3              0        0           0           0         0           0
+    ## 4              0        0           0           0         0           0
+    ## # … with 4 more variables: text_near <dbl>, text_ask <dbl>, text_evacu <dbl>,
+    ## #   text_expect <dbl>
 
-Splitting into validation set if training is too slow to use cross
-validation
+Splitting into validation and training sets.
 
 ``` r
 train_group <- sample(c(TRUE, FALSE), length(y_target), replace = TRUE, prob = c(0.75, 0.25))
@@ -208,15 +210,58 @@ A model trained on text and keywords with cost at 0.1 performed the best
 with an accuracy of 0.7856.
 
 ``` r
-train_x <- bind_cols(train_x_text,train_x_keyword)
-valid_x <- bind_cols(valid_x_text,valid_x_keyword)
+train_x <- bind_cols(train_x_text, train_x_keyword)
+valid_x <- bind_cols(valid_x_text, valid_x_keyword)
+svm <- svm(x = train_x, y = train_y, type = 'C', kernel = 'linear', cost = 0.1, scale = FALSE)
+pred_y <- predict(svm, newdata = valid_x) %>% as.character() %>% as.integer()
+```
+
+``` r
+mean(pred_y) # % of positive predictions
+```
+
+    ## [1] 0.3301459
+
+There definitely is some bias in predictions. It skews towards “not
+disaster” much like the training data. The predictions were 33%
+disasters and the training data had 43%. Depending on the application, I
+could alter the training data to represent each category equally. This
+can be done with either sampling or removing non disaster tweets until
+categories are equal.
+
+``` r
+data.frame(
+  predictions = pred_y,
+  actual = valid_y
+) %>% 
+  group_by(predictions) %>% 
+  summarise(real_0 = mean(actual == 0), real_1 = mean(actual == 1))
+```
+
+    ## # A tibble: 2 × 3
+    ##   predictions real_0 real_1
+    ##         <int>  <dbl>  <dbl>
+    ## 1           0  0.778  0.222
+    ## 2           1  0.200  0.800
+
+78% of non-disaster tweets were correctly labeled and 80% of disaster
+tweets were correctly labeled.
+
+There are a few things I may want to do in the future:  
+1. fill out the rest of the keywords  
+2. fill out locations with places in text  
+3. work with the links  
+4. use tweets being replied to
+
+Fit on all data.
+
+``` r
 x <- bind_rows(train_x, valid_x)
 y <- c(train_y, valid_y)
-
 svm <- svm(x = x, y = y, type = 'C', kernel = 'linear', cost = 0.1, scale = FALSE)
 ```
 
-fitting test data
+Predicting test data target.
 
 ``` r
 pred_submit <- predict(svm, newdata = bind_cols(test_x_text, test_x_keyword))
@@ -245,9 +290,3 @@ head(data.frame(prediction = pred_submit, text = test$text), 10)
     ## 8                                                                                 Hey! How are you?
     ## 9                                                                                  What a nice hat?
     ## 10                                                                                        Fuck off!
-
-There are a few things I may want to do in the future:  
-1. fill out the rest of the keywords  
-2. fill out locations with places in text  
-3. work with the links  
-4. use tweets being replied to

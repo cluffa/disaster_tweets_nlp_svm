@@ -10,7 +10,7 @@ With Kaggle disaster tweets dataset:
 [Natural Language Processing with Disaster Tweets \| Kaggle](https://www.kaggle.com/c/nlp-getting-started)
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, cache = TRUE, cache.comments = FALSE)
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE, cache.comments = FALSE, warning=FALSE, message=FALSE)
 library(tidyverse)
 library(tm)
 library(e1071)
@@ -62,7 +62,7 @@ preprocess_tweets <- function(text, prob = 0.999, extra_blacklist = c()) {
 }
 ```
 
-I will use the same function on text, keyword, and location to make it simple. This adds about 100 more variables than just using text.
+I will use the same function on text, keyword, and location to make it simple. This adds 100s of new predictors to use depending on how many sparse words I remove.
 
 ```{r warning=FALSE}
 n <- nrow(tweets)
@@ -96,7 +96,7 @@ tweets$text[1:4]
 x_text[1:4, 1:10]
 ```
 
-Splitting into validation set if training is too slow to use cross validation
+Splitting into validation and training sets.
 
 ```{r}
 train_group <- sample(c(TRUE, FALSE), length(y_target), replace = TRUE, prob = c(0.75, 0.25))
@@ -112,7 +112,6 @@ valid_x_keyword <- x_keyword[!train_group,]
 train_y <- y_target[train_group]
 valid_y <- y_target[!train_group]
 ```
-
 
 Testing accuracy with inclusion of different text fields and cost with linear svm. 
 
@@ -145,29 +144,54 @@ for (i in trys) {
   }
 }
 ```
+
 ```{r warning=FALSE, message=FALSE}
 results %>% arrange(desc(accuracy))
 ```
 
 A model trained on text and keywords with cost at 0.1 performed the best with an accuracy of 0.7856.
 
-```{r warning=FALSE, message=FALSE}
-train_x <- bind_cols(train_x_text,train_x_keyword)
-valid_x <- bind_cols(valid_x_text,valid_x_keyword)
-x <- bind_rows(train_x, valid_x)
-y <- c(train_y, valid_y)
-
-svm <- svm(x = x, y = y, type = 'C', kernel = 'linear', cost = 0.1, scale = FALSE)
+```{r}
+train_x <- bind_cols(train_x_text, train_x_keyword)
+valid_x <- bind_cols(valid_x_text, valid_x_keyword)
+svm <- svm(x = train_x, y = train_y, type = 'C', kernel = 'linear', cost = 0.1, scale = FALSE)
+pred_y <- predict(svm, newdata = valid_x) %>% as.character() %>% as.integer()
 ```
 
-fitting test data
-```{r warning=FALSE, message=FALSE}
-pred_submit <- predict(svm, newdata = bind_cols(test_x_text, test_x_keyword))
-head(data.frame(prediction = pred_submit, text = test$text), 10)
+```{r}
+mean(pred_y) # % of positive predictions
 ```
+
+There definitely is some bias in predictions. It skews towards "not disaster" much like the training data. The predictions were 33% disasters and the training data had 43%. Depending on the application, I could alter the training data to represent each category equally. This can be done with either sampling or removing non disaster tweets until categories are equal.
+
+```{r}
+data.frame(
+  predictions = pred_y,
+  actual = valid_y
+) %>% 
+  group_by(predictions) %>% 
+  summarise(real_0 = mean(actual == 0), real_1 = mean(actual == 1))
+```
+
+78% of non-disaster tweets were correctly labeled and 80% of disaster tweets were correctly labeled.
 
 There are a few things I may want to do in the future:  
 1. fill out the rest of the keywords  
 2. fill out locations with places in text  
 3. work with the links  
-4. use tweets being replied to  
+4. use tweets being replied to
+
+Fit on all data.
+```{r warning=FALSE, message=FALSE}
+x <- bind_rows(train_x, valid_x)
+y <- c(train_y, valid_y)
+svm <- svm(x = x, y = y, type = 'C', kernel = 'linear', cost = 0.1, scale = FALSE)
+```
+
+Predicting test data target.
+```{r warning=FALSE, message=FALSE}
+pred_submit <- predict(svm, newdata = bind_cols(test_x_text, test_x_keyword))
+head(data.frame(prediction = pred_submit, text = test$text), 10)
+```
+
+
