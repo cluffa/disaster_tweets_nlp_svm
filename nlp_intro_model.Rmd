@@ -1,6 +1,15 @@
 ---
 title: "Disaster Tweets"
-output: github_document
+author: "author: Alex Cluff"
+date: "(last edit `r Sys.time()`)"
+output:
+  html_document:
+    code_folding: show
+    self_contained: false
+    toc: true
+    
+knit: (function(inputFile, encoding) {
+  rmarkdown::render(inputFile, encoding = encoding, output_dir = "./docs", output_file = "index.html")})
 ---
 
 This is project to introduce myself to NLP in R.
